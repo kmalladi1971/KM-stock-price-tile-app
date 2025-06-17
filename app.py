@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, jsonify
 import yfinance as yf
 import os
 
@@ -17,8 +17,8 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>KM Stock Dashboard</title>
-    <meta http-equiv="refresh" content="60">
+    <title>Stock Dashboard</title>
+    <meta charset="utf-8">
     <style>
         body { font-family: Arial, sans-serif; padding: 40px; background-color: #f4f6f8; }
         h1 { text-align: center; color: #2c3e50; }
@@ -50,7 +50,30 @@ HTML_TEMPLATE = """
         .down { color: #e74c3c; }
         .same { color: #888888; }
         .percent { font-size: 14px; margin-left: 6px; }
+
+        .price .percent { font-weight: normal; }
     </style>
+    <script>
+    function fetchData() {
+        const query = document.querySelector('[name="q"]').value || "";
+        const filter = document.querySelector('[name="filter"]').value || "all";
+
+        fetch(`/data?q=${query}&filter=${filter}`)
+            .then(res => res.json())
+            .then(data => {
+                for (const name in data) {
+                    const stock = data[name];
+                    const tile = document.querySelector(`[data-stock="${stock.symbol}"]`);
+                    if (tile) {
+                        const priceEl = tile.querySelector(".price");
+                        priceEl.innerHTML = `$${stock.price} <span class="percent">(${stock.percent})</span>`;
+                        priceEl.className = `price ${stock.trend}`;
+                    }
+                }
+            });
+    }
+    setInterval(fetchData, 30000);
+    </script>
 </head>
 <body>
     <h1>Real-Time Stock Prices (Delayed)</h1>
@@ -66,7 +89,7 @@ HTML_TEMPLATE = """
 
     <div class="container">
         {% for name, info in prices.items() %}
-        <div class="tile {{ info.region }}">
+        <div class="tile {{ info.region }}" data-stock="{{ info.symbol }}">
             <div class="title">{{ name }}</div>
             <div class="symbol">{{ info.symbol }}</div>
             <div class="price {{ info.trend }}">
@@ -84,11 +107,9 @@ def get_prices(query=None, region_filter='all'):
     for name, symbol in TICKERS.items():
         region = "asx" if ".AX" in symbol else "us"
 
-        # Filter by region
         if region_filter != 'all' and region != region_filter:
             continue
 
-        # Filter by search query
         if query:
             if query.lower() not in name.lower() and query.lower() not in symbol.lower():
                 continue
@@ -137,6 +158,13 @@ def index():
     region_filter = request.args.get("filter", "all")
     prices = get_prices(query, region_filter)
     return render_template_string(HTML_TEMPLATE, prices=prices, query=query, active_filter=region_filter)
+
+@app.route("/data")
+def data():
+    query = request.args.get("q", "").strip()
+    region_filter = request.args.get("filter", "all")
+    prices = get_prices(query, region_filter)
+    return jsonify(prices)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
