@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request
 import yfinance as yf
 import os
 
@@ -17,17 +17,14 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Stock Prices</title>
+    <title>KM Stock Dashboard</title>
     <meta http-equiv="refresh" content="60">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            padding: 40px;
-            background-color: #f4f6f8;
-        }
-        h1 {
-            text-align: center;
-            color: #2c3e50;
+        body { font-family: Arial, sans-serif; padding: 40px; background-color: #f4f6f8; }
+        h1 { text-align: center; color: #2c3e50; }
+        form { text-align: center; margin-bottom: 30px; }
+        input[type="text"], select {
+            padding: 10px; font-size: 16px; margin: 0 10px; border-radius: 6px; border: 1px solid #ccc;
         }
         .container {
             display: grid;
@@ -43,44 +40,37 @@ HTML_TEMPLATE = """
             transition: transform 0.2s ease;
             border-left: 6px solid #ccc;
         }
-        .tile:hover {
-            transform: translateY(-4px);
-        }
+        .tile:hover { transform: translateY(-4px); }
         .asx { border-left-color: #3498db; }
         .us { border-left-color: #2ecc71; }
-        .title {
-            font-size: 18px;
-            color: #333333;
-            margin-bottom: 8px;
-        }
-        .symbol {
-            font-size: 14px;
-            color: #7f8c8d;
-        }
-        .price {
-            font-size: 22px;
-            font-weight: bold;
-            margin-top: 10px;
-        }
+        .title { font-size: 18px; color: #333333; margin-bottom: 8px; }
+        .symbol { font-size: 14px; color: #7f8c8d; }
+        .price { font-size: 22px; font-weight: bold; margin-top: 10px; }
         .up { color: #27ae60; }
         .down { color: #e74c3c; }
         .same { color: #888888; }
-        .percent {
-            font-size: 14px;
-            margin-left: 6px;
-        }
+        .percent { font-size: 14px; margin-left: 6px; }
     </style>
 </head>
 <body>
     <h1>Real-Time Stock Prices (Delayed)</h1>
+    <form method="get">
+        <input type="text" name="q" placeholder="Search stocks..." value="{{ query }}">
+        <select name="filter">
+            <option value="all" {% if active_filter == 'all' %}selected{% endif %}>All</option>
+            <option value="asx" {% if active_filter == 'asx' %}selected{% endif %}>ASX Only</option>
+            <option value="us" {% if active_filter == 'us' %}selected{% endif %}>US Only</option>
+        </select>
+        <input type="submit" value="Filter">
+    </form>
+
     <div class="container">
         {% for name, info in prices.items() %}
         <div class="tile {{ info.region }}">
             <div class="title">{{ name }}</div>
             <div class="symbol">{{ info.symbol }}</div>
             <div class="price {{ info.trend }}">
-                ${{ info.price }}
-                <span class="percent">({{ info.percent }})</span>
+                ${{ info.price }} <span class="percent">({{ info.percent }})</span>
             </div>
         </div>
         {% endfor %}
@@ -89,9 +79,20 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def get_prices():
-    prices = {}
+def get_prices(query=None, region_filter='all'):
+    results = {}
     for name, symbol in TICKERS.items():
+        region = "asx" if ".AX" in symbol else "us"
+
+        # Filter by region
+        if region_filter != 'all' and region != region_filter:
+            continue
+
+        # Filter by search query
+        if query:
+            if query.lower() not in name.lower() and query.lower() not in symbol.lower():
+                continue
+
         try:
             ticker = yf.Ticker(symbol)
             data = ticker.history(period="1d", interval="1m")
@@ -111,23 +112,16 @@ def get_prices():
                 diff = current_price - previous_close
                 percent = (diff / previous_close) * 100
                 percent_str = f"{percent:+.2f}%"
-                if diff > 0:
-                    trend = "up"
-                elif diff < 0:
-                    trend = "down"
-                else:
-                    trend = "same"
+                trend = "up" if diff > 0 else "down" if diff < 0 else "same"
             else:
                 percent_str = "N/A"
                 trend = "same"
-
         except:
             current_price = "Error"
             percent_str = "N/A"
             trend = "same"
 
-        region = "asx" if ".AX" in symbol else "us"
-        prices[name] = {
+        results[name] = {
             "symbol": symbol,
             "price": current_price,
             "trend": trend,
@@ -135,11 +129,14 @@ def get_prices():
             "percent": percent_str
         }
 
-    return prices
+    return results
 
 @app.route("/")
 def index():
-    return render_template_string(HTML_TEMPLATE, prices=get_prices())
+    query = request.args.get("q", "").strip()
+    region_filter = request.args.get("filter", "all")
+    prices = get_prices(query, region_filter)
+    return render_template_string(HTML_TEMPLATE, prices=prices, query=query, active_filter=region_filter)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
